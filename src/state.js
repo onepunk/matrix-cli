@@ -13,7 +13,11 @@ export function detectState(lines) {
   if (/^\s*[^\p{L}\p{N}\n]*[\p{L}][\p{L}\p{M} -]*(?:…|\.{3})\s*\([^\n)]*?\b\d+(?:\.\d+)?[hms](?=[\s·•)])[^\n)]*\)\s*$/mu.test(footer)) return 'working';
   if (/^[ \t]*[✳✶✻✽✢✱*·][ \t]+[\p{L}][\p{L}\p{M} -]*(?:…|\.{3})[ \t]*$/mu.test(footer)) return 'working';
   // Background reviews move their waiting indicator above the large empty prompt area.
-  if (visible.some(line => /^[ \t]*[✳✶✻✽✢✱*·][ \t]+Waiting for \d+ background agents? to finish[ \t]*$/u.test(line))) return 'working';
+  const waiting = visible.findLastIndex(line => /^[ \t]*[✳✶✻✽✢✱*·][ \t]+Waiting for \d+ background agents? to finish[ \t]*$/u.test(line));
+  const ended = visible.slice(waiting + 1).some(line =>
+    /All background agents (?:stopped|finished|completed)/i.test(line) ||
+    /^[ \t]*[✳✶✻✽✢✱*·][ \t]+[\p{L} -]+ for \d+(?:\.\d+)?[hms]\b/u.test(line));
+  if (waiting >= 0 && !ended) return 'working';
   return 'idle';
 }
 

@@ -197,3 +197,12 @@ process.stdin.on('data',()=>{
     assert.ok(!screen().includes('claude working'));
   } finally {child.kill();term.dispose();await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('historical background waiting cannot hide completion or cancellation', () => {
+  const waiting = '* Waiting for 1 background agent to finish';
+  for (const ending of ['⏺ All background agents stopped', '✻ Crunched for 4m 18s · done', '✻ Cooked for 35s']) {
+    assert.equal(detectState([waiting, ending, ...Array(20).fill(''), '❯']), 'idle');
+  }
+  assert.equal(detectState(['✻ Cooked for 35s', waiting, ...Array(20).fill(''), '❯']), 'working');
+});
