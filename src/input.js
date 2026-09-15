@@ -7,11 +7,17 @@ export class InputParser {
   push(text) {
     this.pending += text;
     const events = [];
+    const emit = (type, data) => {
+      // Read boundaries are not key boundaries. Keep wrapper shortcuts separate,
+      // but leave every byte inside a bracketed paste as literal input.
+      const parts = type === 'text' ? data.split(/(\x1d)/) : [data];
+      for (const part of parts) if (part) events.push({type, data: part});
+    };
     while (this.pending) {
       const marker = this.pasting ? END : START;
       const index = this.pending.indexOf(marker);
       if (index >= 0) {
-        if (index) events.push({ type: this.pasting ? 'paste-data' : 'text', data: this.pending.slice(0,index) });
+        if (index) emit(this.pasting ? 'paste-data' : 'text', this.pending.slice(0,index));
         events.push({type: this.pasting ? 'paste-end' : 'paste-start', data: marker});
         this.pasting = !this.pasting;
         this.pending = this.pending.slice(index + marker.length);
@@ -24,7 +30,7 @@ export class InputParser {
         keep = Math.max(keep,this.pending.length-escape);
       }
       const data = this.pending.slice(0,this.pending.length-keep);
-      if (data) events.push({type: this.pasting ? 'paste-data' : 'text',data});
+      if (data) emit(this.pasting ? 'paste-data' : 'text',data);
       this.pending = this.pending.slice(this.pending.length-keep);
       break;
     }

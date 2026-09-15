@@ -194,7 +194,7 @@ process.stdin.on('data',()=>{
     await until(()=>screen().includes('claude working'));
     // Reveal, start the deterministic phase sequence, then explicitly return to rain.
     child.write('\x1d'); await until(()=>screen().includes('Thinking'));
-    child.write('go'); child.write('\x1d');
+    child.write('go\x1d'); // A PTY may coalesce adjacent writes into this one chunk.
     await until(()=>screen().includes('claude working'));
     const start=Date.now();
     while(Date.now()-start<450){assert.ok(screen().includes('claude working'));await new Promise(r=>setTimeout(r,20));}
@@ -326,4 +326,18 @@ test('return transition resolves current output and restores Unicode, colours an
   assert.equal(target.buffer.active.cursorY,source.buffer.active.cursorY);
   assert.ok(transition.done(850));
   source.dispose();target.dispose();
+});
+
+
+test('coalesced toggle keys are handled separately outside bracketed paste', () => {
+  const parser = new InputParser();
+  assert.deepEqual(parser.push('go\x1dnext\x1d'),[
+    {type:'text',data:'go'}, {type:'text',data:'\x1d'},
+    {type:'text',data:'next'}, {type:'text',data:'\x1d'},
+  ]);
+  assert.deepEqual(parser.push('\x1b[200~go\x1dnext\x1b[201~'),[
+    {type:'paste-start',data:'\x1b[200~'},
+    {type:'paste-data',data:'go\x1dnext'},
+    {type:'paste-end',data:'\x1b[201~'},
+  ]);
 });
