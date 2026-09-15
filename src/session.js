@@ -1,10 +1,11 @@
 import pty from 'node-pty';
+import { TextFlicker } from './flicker.js';
 import { ReturnTransition } from './return.js';
 import { InputParser } from './input.js';
 import xterm from '@xterm/headless';
 import { detectState, ViewState } from './state.js';
 import { Rain } from './rain.js';
-import { renderScreen, screenLines, captureScreen } from './screen.js';
+import { screenLines, captureScreen } from './screen.js';
 
 export async function runSession(command, args, { demo = false } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('An interactive terminal is required.');
@@ -12,6 +13,7 @@ export async function runSession(command, args, { demo = false } = {}) {
   const term = new xterm.Terminal({ ...size(), allowProposedApi: true, scrollback: 5000 });
   const view = new ViewState();
   const rain = new Rain();
+  const flicker = new TextFlicker();
   const parser = new InputParser();
   let discardPaste = false, inputTimer;
   let dirty = true, closed = false, offset = 0, pending = 0, exitEvent;
@@ -33,11 +35,12 @@ export async function runSession(command, args, { demo = false } = {}) {
       if (!showingRain) rain.enter(visibleCells);
       showingRain = true;
       process.stdout.write(rain.frame(term.cols,term.rows,`${command} working`));
-    } else if (dirty || showingRain || returning) {
-      if (showingRain && !offset) returning = new ReturnTransition(performance.now(), view.state === 'attention' ? 350 : 850);
+    } else if (dirty || showingRain || returning || flicker.active) {
+      if (view.state === 'attention') { returning = undefined; flicker.settle(); }
+      if (showingRain && !offset && view.state !== 'attention') returning = new ReturnTransition(performance.now(),500,flicker);
       showingRain = false;
       if (returning?.done()) returning = undefined;
-      process.stdout.write(returning ? returning.frame(term, rain) : renderScreen(term, offset));
+      process.stdout.write(returning ? returning.frame(term, rain) : flicker.frame(term, offset, performance.now(), view.state !== 'attention'));
       visibleCells = captureScreen(term, offset);
       dirty = false;
     }
@@ -46,7 +49,7 @@ export async function runSession(command, args, { demo = false } = {}) {
   const done = new Promise(resolve => { resolveDone = resolve; });
   const finish = (code = 0) => {
     if (closed) return;
-    returning = undefined; showingRain = false;
+    flicker.settle(); returning = undefined; showingRain = false;
     if (!demo) { view.reveal(); offset = 0; dirty = true; paint(); }
     const finalText = demo ? '' : screenLines(term).map(line => line.trimEnd()).join('\r\n').trimEnd();
     closed = true;
@@ -68,7 +71,7 @@ export async function runSession(command, args, { demo = false } = {}) {
       if (event.type === 'text') { input(event.data); continue; }
       if (event.type === 'paste-start') {
         const autoReturn = returning && !view.peek;
-        if (returning) { returning = undefined; dirty = true; paint(); }
+        if (returning || flicker.active) { flicker.settle(); returning = undefined; dirty = true; paint(); }
         discardPaste = view.rain || offset > 0 || Boolean(autoReturn);
         if (discardPaste) { view.reveal(); offset = 0; dirty = true; paint(); }
       }
@@ -85,10 +88,11 @@ export async function runSession(command, args, { demo = false } = {}) {
   function input(chunk) {
     const data = chunk.toString('utf8');
     if (demo) { if (data.includes('\x03') || data === 'q') finish(); return; }
-    if (returning) {
-      returning = undefined; dirty = true; paint();
+    if (returning || flicker.active) {
+      const autoReturn = returning && !view.peek;
+      flicker.settle(); returning = undefined; dirty = true; paint();
       // First input during an automatic reveal finishes it without answering unseen prompts.
-      if (!view.peek && data !== '\x03' && data !== '\x1d') { view.reveal(); return; }
+      if (autoReturn && data !== '\x03' && data !== '\x1d') { view.reveal(); return; }
     }
     if (data === '\x1d') { offset = 0; view.toggle(); dirty = true; paint(); return; }
     if (data === '\x1b[5;2~' || data === '\x1b[6;2~') {
@@ -104,7 +108,7 @@ export async function runSession(command, args, { demo = false } = {}) {
     if (/[\r\n]/.test(data)) view.submitted();
     child.write(data);
   }
-  function resize() { if (closed) return; returning = undefined; const s = size(); term.resize(s.cols,s.rows); child?.resize(s.cols,s.rows); dirty = true; paint(); }
+  function resize() { if (closed) return; flicker.settle(); returning = undefined; const s = size(); term.resize(s.cols,s.rows); child?.resize(s.cols,s.rows); dirty = true; paint(); }
   process.stdin.on('data', receive); process.stdout.on('resize', resize);
   process.on('SIGTERM', terminate); process.on('SIGHUP', hangup); process.on('SIGINT', interrupt);
   const timer = setInterval(paint, 60);

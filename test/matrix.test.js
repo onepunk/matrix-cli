@@ -8,6 +8,7 @@ import xterm from '@xterm/headless';
 import { detectState, ViewState } from '../src/state.js';
 import { renderScreen, screenLines, captureScreen } from '../src/screen.js';
 import { Rain } from '../src/rain.js';
+import { TextFlicker } from '../src/flicker.js';
 import { ReturnTransition } from '../src/return.js';
 import { InputParser } from '../src/input.js';
 const write = (term, data) => new Promise(resolve => term.write(data, resolve));
@@ -318,9 +319,10 @@ test('return transition resolves current output and restores Unicode, colours an
   const transition = new ReturnTransition(0);
   await write(target,'\x1b[?7l'+transition.frame(source,rain,400));
   assert.equal(target.buffer.active.baseY,0);
-  assert.ok(screenLines(target)[0].includes('Review complete 界'));
+  assert.ok(transition.flicker.active);
   await write(source,'\r\nReady for your next prompt.');
   await write(target,transition.frame(source,rain,850));
+  await write(target,transition.frame(source,rain,1400));
   assert.deepEqual(screenLines(target).map(s=>s.trimEnd()),screenLines(source).map(s=>s.trimEnd()));
   assert.equal(target.buffer.active.getLine(0).getCell(0).getFgColor(),1);
   assert.equal(target.buffer.active.cursorY,source.buffer.active.cursorY);
@@ -340,4 +342,31 @@ test('coalesced toggle keys are handled separately outside bracketed paste', () 
     {type:'paste-data',data:'go\x1dnext'},
     {type:'paste-end',data:'\x1b[201~'},
   ]);
+});
+
+test('fresh text staggers independently, settles within 500ms and never restarts unchanged text', async () => {
+  const source = new xterm.Terminal({cols:40,rows:10,allowProposedApi:true});
+  const target = new xterm.Terminal({cols:40,rows:10,allowProposedApi:true});
+  let n = 0;
+  const flicker = new TextFlicker(() => (++n % 4) / 4);
+  try {
+    await write(source,'Hello 界\r\n> ');
+    await write(target,flicker.frame(source,0,0));
+    const count = flicker.animations.size;
+    assert.ok(count > 1);
+    assert.equal(screenLines(target)[1].trimEnd(),'>');
+    await write(target,flicker.frame(source,0,300));
+    assert.ok(flicker.animations.size > 0 && flicker.animations.size < count);
+    await write(target,flicker.frame(source,0,500));
+    assert.equal(flicker.active,false);
+    assert.deepEqual(screenLines(target).map(s=>s.trimEnd()),screenLines(source).map(s=>s.trimEnd()));
+    flicker.frame(source,0,600);
+    assert.equal(flicker.active,false);
+    await write(source,'\x1b[1;9Hnew\x1b[2;3H');
+    flicker.frame(source,0,700);
+    assert.equal(flicker.animations.size,3);
+    await write(target,flicker.frame(source,0,720,false));
+    assert.equal(flicker.active,false);
+    assert.deepEqual(screenLines(target).map(s=>s.trimEnd()),screenLines(source).map(s=>s.trimEnd()));
+  } finally { source.dispose(); target.dispose(); }
 });

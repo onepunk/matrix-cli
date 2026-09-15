@@ -1,6 +1,8 @@
 # Matrix CLI
 
-Matrix-style code rain for **Codex CLI** and **Claude Code**. Dim background streams and brighter, faster foreground trails add depth while your agent works. The visible text falls into the rain when you switch views. Returning to the CLI clears the rain in staggered columns as its text resolves back into place.
+**`text-flicker` experiment:** fresh output resolves from random green Matrix characters, with independent timing per character over roughly half a second. Returning from rain uses the same effect. Prompts and approval dialogs remain immediately readable.
+
+Matrix-style code rain for **Codex CLI** and **Claude Code**. Dim background streams and brighter, faster foreground trails add depth while your agent works. The visible text falls into the rain when you switch views. Returning to the CLI reveals its text through a brief flicker of green Matrix characters.
 
 ## Install
 
