@@ -3,7 +3,10 @@ export function detectState(lines) {
   const visible = [...lines];
   while (visible.length && !visible.at(-1).trim()) visible.pop();
   const footer = visible.slice(-10).join('\n');
-  if (/(?:allow|approve|permission|confirm|do you want|would you like|sign in|log in|error:|failed|press enter|enter to (?:confirm|select))/i.test(footer)) return 'attention';
+  // Claude displays this mode badge even while working. It is not a request.
+  // Remove only the known badge phrase, so actual questions on the same line win.
+  const prompts = footer.replace(/\bbypass permissions on\b/gi, '');
+  if (/(?:allow|approve|permission|confirm|do you want|would you like|sign in|log in|error:|failed|press enter|enter to (?:confirm|select))/i.test(prompts)) return 'attention';
   if (/(?:esc(?:ape)? to (?:interrupt|cancel|stop)|ctrl\+c to interrupt)/i.test(footer)) return 'working';
   return 'idle';
 }

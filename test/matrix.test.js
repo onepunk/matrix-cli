@@ -106,3 +106,19 @@ test('entry captures screen characters, drops and morphs them, and restarts on r
   assert.equal(screenLines(target)[0].trimEnd(),'New screen');
   source.dispose(); target.dispose();
 });
+
+
+test('Claude bypass-permissions mode badge does not suppress rain or toggling', () => {
+  const badge = '⏵⏵ bypass permissions on (shift+tab to cycle)';
+  assert.equal(detectState(['Thinking… (esc to interrupt)', '❯', badge]), 'working');
+  assert.equal(detectState(['❯', badge]), 'idle');
+  assert.equal(detectState(['Thinking… (esc to interrupt)', 'Do you want to continue?', badge]), 'attention');
+  assert.equal(detectState(['Thinking… (esc to interrupt)', badge + ' · Confirm action?']), 'attention');
+  const view = new ViewState();
+  view.update(detectState(['Thinking… (esc to interrupt)', badge]));
+  assert.ok(view.rain);
+  view.reveal();
+  view.update(detectState(['Thinking… (esc to interrupt)', badge]));
+  assert.equal(view.rain,false);
+  view.toggle(); assert.ok(view.rain);
+});
