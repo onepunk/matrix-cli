@@ -8,6 +8,7 @@ import xterm from '@xterm/headless';
 import { detectState, ViewState } from '../src/state.js';
 import { renderScreen, screenLines, captureScreen } from '../src/screen.js';
 import { Rain } from '../src/rain.js';
+import { TextFlicker } from '../src/flicker.js';
 import { ReturnTransition } from '../src/return.js';
 import { InputParser } from '../src/input.js';
 const write = (term, data) => new Promise(resolve => term.write(data, resolve));
@@ -318,9 +319,10 @@ test('return transition resolves current output and restores Unicode, colours an
   const transition = new ReturnTransition(0);
   await write(target,'\x1b[?7l'+transition.frame(source,rain,400));
   assert.equal(target.buffer.active.baseY,0);
-  assert.ok(screenLines(target)[0].includes('Review complete 界'));
+  assert.ok(transition.flicker.active);
   await write(source,'\r\nReady for your next prompt.');
   await write(target,transition.frame(source,rain,850));
+  await write(target,transition.frame(source,rain,1400));
   assert.deepEqual(screenLines(target).map(s=>s.trimEnd()),screenLines(source).map(s=>s.trimEnd()));
   assert.equal(target.buffer.active.getLine(0).getCell(0).getFgColor(),1);
   assert.equal(target.buffer.active.cursorY,source.buffer.active.cursorY);
@@ -340,4 +342,108 @@ test('coalesced toggle keys are handled separately outside bracketed paste', () 
     {type:'paste-data',data:'go\x1dnext'},
     {type:'paste-end',data:'\x1b[201~'},
   ]);
+});
+
+test('fresh text staggers independently, settles within 500ms and never restarts unchanged text', async () => {
+  const source = new xterm.Terminal({cols:40,rows:10,allowProposedApi:true});
+  const target = new xterm.Terminal({cols:40,rows:10,allowProposedApi:true});
+  let n = 0;
+  const flicker = new TextFlicker(() => (++n % 4) / 4);
+  try {
+    await write(source,'Hello 界\r\n> ');
+    await write(target,flicker.frame(source,0,0));
+    const count = flicker.animations.size;
+    assert.ok(count > 1);
+    assert.equal(screenLines(target)[1].trimEnd(),'>');
+    await write(target,flicker.frame(source,0,300));
+    assert.ok(flicker.animations.size > 0 && flicker.animations.size < count);
+    await write(target,flicker.frame(source,0,500));
+    assert.equal(flicker.active,false);
+    assert.deepEqual(screenLines(target).map(s=>s.trimEnd()),screenLines(source).map(s=>s.trimEnd()));
+    flicker.frame(source,0,600);
+    assert.equal(flicker.active,false);
+    await write(source,'\x1b[1;9Hnew\x1b[2;3H');
+    flicker.frame(source,0,700);
+    assert.equal(flicker.animations.size,3);
+    await write(target,flicker.frame(source,0,720,false));
+    assert.equal(flicker.active,false);
+    assert.deepEqual(screenLines(target).map(s=>s.trimEnd()),screenLines(source).map(s=>s.trimEnd()));
+  } finally { source.dispose(); target.dispose(); }
+});
+
+test('redrawing scrolled output only flickers new text and preserves in-flight timing', async () => {
+  const source = new xterm.Terminal({cols:40,rows:10,allowProposedApi:true});
+  const flicker = new TextFlicker(() => .9);
+  const draw = lines => write(source,'\x1b[2J\x1b[H'+lines.join('\r\n')+'\x1b[10;1H');
+  try {
+    await write(source,'\x1b[?1049h');
+    await draw(['First line','Second line','Third line']);
+    flicker.frame(source,0,0);
+    flicker.frame(source,0,500);
+    await draw(['Second line','Third line','Fresh output']);
+    flicker.frame(source,0,600);
+    assert.ok(flicker.active);
+    assert.ok([...flicker.animations.keys()].every(key=>key.startsWith('alternate:2:')));
+    const deadlines = [...flicker.animations.values()].map(a=>a.until);
+    await draw(['Third line','Fresh output','Newest output']);
+    flicker.frame(source,0,700);
+    assert.deepEqual([...flicker.animations].filter(([key])=>key.startsWith('alternate:1:')).map(([,a])=>a.until),deadlines);
+    flicker.frame(source,0,1200);
+    assert.equal(flicker.active,false);
+  } finally { source.dispose(); }
+});
+
+test('wrapper effect flags are independent and preserve agent arguments', async () => {
+  const { parseOptions } = await import('../src/options.js');
+  assert.deepEqual(parseOptions(['--no-rain','claude','--dangerously-skip-permissions','--no-text-flicker']), {
+    command:'claude', args:['--dangerously-skip-permissions'], options:{rain:false,textFlicker:false},
+  });
+  assert.deepEqual(parseOptions(['codex','--','--no-rain']), {
+    command:'codex', args:['--','--no-rain'], options:{rain:true,textFlicker:true},
+  });
+});
+
+for (const agent of ['claude','codex']) for (const flags of [
+  ['--no-rain'], ['--no-text-flicker'], ['--no-rain','--no-text-flicker'],
+]) test(`${agent}: effect options ${flags.join(' ')}`, {timeout:10000}, async () => {
+  const dir = await mkdtemp(join(tmpdir(),'matrix-flags-'));
+  await writeFile(join(dir,agent), `#!${process.execPath}
+process.stdin.setRawMode(true); process.stdin.resume();
+process.stdout.write('Existing output\\r\\nWorking (esc to interrupt)\\r\\n> ');
+process.stdin.on('data',b=>{
+ if(b.toString().includes('hello')) {process.stdout.write('\\r\\nReceived hello');setTimeout(()=>process.exit(0),100);}
+});
+`, {mode:0o755});
+  const term = new xterm.Terminal({cols:80,rows:24,allowProposedApi:true});
+  const child = pty.spawn(process.execPath,[resolve('src/cli.js'),agent,...flags], {
+    cols:80,rows:24,cwd:process.cwd(),env:{...process.env,PATH:`${dir}:${process.env.PATH}`},
+  });
+  let raw='',exited=false;
+  child.onData(data=>{raw+=data;term.write(data);});
+  const exit = new Promise(resolve=>child.onExit(e=>{exited=true;resolve(e);}));
+  const screen=()=>screenLines(term).join('\n');
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  async function until(check) {
+    const start=Date.now();
+    while(!check()) {if(Date.now()-start>5000)throw new Error('Timed out: '+screen());await sleep(20);}
+  }
+  try {
+    if (flags.includes('--no-rain')) {
+      await until(()=>screen().includes('Existing output'));
+      child.write('\x1d');
+      await sleep(150);
+      assert.ok(!screen().includes(agent+' working'));
+      // Input and paste must not be consumed just because the agent is working.
+      child.write('\x1b[200~hello\x1b[201~');
+    } else {
+      await until(()=>screen().includes(agent+' working'));
+      raw='';
+      child.write('x');
+      await until(()=>screen().includes('Existing output'));
+      child.write('hello');
+    }
+    assert.equal((await exit).exitCode,0);
+    assert.ok(raw.includes('Received hello'));
+    if (flags.includes('--no-text-flicker')) assert.ok(!raw.includes('\x1b[0;38;5;195m') && !raw.includes('\x1b[0;38;5;46m'));
+  } finally {if(!exited)child.kill();term.dispose();await rm(dir,{recursive:true,force:true});}
 });
