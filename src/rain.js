@@ -54,6 +54,7 @@ export class Rain {
         if (particle.width === 2) grid[y][particle.x + 1] = morph ? ' ' : '';
       }
     } else this.particles = [];
+    this.lastGrid = grid;
     for (let y = 0; y < height; y++) out += `\x1b[${y+1};1H${grid[y].join('')}\x1b[0m\x1b[K`;
     const status = ` ${label}  •  Ctrl+] toggle  •  any key reveals`;
     return out + `\x1b[${height+1};1H\x1b[0;32m${status.slice(0, Math.max(0, cols-1))}\x1b[K\x1b[${rows};1H\x1b[0m\x1b[K`;

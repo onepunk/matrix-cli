@@ -1,6 +1,6 @@
 # Matrix CLI
 
-Matrix-style code rain for **Codex CLI** and **Claude Code**. Dim background streams and brighter, faster foreground trails add depth while your agent works. The visible text falls into the rain when you switch views.
+Matrix-style code rain for **Codex CLI** and **Claude Code**. Dim background streams and brighter, faster foreground trails add depth while your agent works. The visible text falls into the rain when you switch views. Returning to the CLI clears the rain in staggered columns as its text resolves back into place.
 
 ## Install
 

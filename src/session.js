@@ -1,4 +1,5 @@
 import pty from 'node-pty';
+import { ReturnTransition } from './return.js';
 import { InputParser } from './input.js';
 import xterm from '@xterm/headless';
 import { detectState, ViewState } from './state.js';
@@ -15,7 +16,7 @@ export async function runSession(command, args, { demo = false } = {}) {
   let discardPaste = false, inputTimer;
   let dirty = true, closed = false, offset = 0, pending = 0, exitEvent;
   let child;
-  let showingRain = false, visibleCells = [];
+  let showingRain = false, visibleCells = [], returning;
   if (!demo) child = pty.spawn(command, args, { ...size(), name: 'xterm-256color', cwd: process.cwd(), env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } });
   const wasRaw = process.stdin.isRaw;
   process.stdin.setRawMode(true);
@@ -28,12 +29,15 @@ export async function runSession(command, args, { demo = false } = {}) {
     view.tick();
     if (demo) { if (dirty) process.stdout.write(rain.frame(term.cols,term.rows,'MATRIX DEMO — Ctrl+C exits')); return; }
     if (view.rain && !offset) {
+      returning = undefined;
       if (!showingRain) rain.enter(visibleCells);
       showingRain = true;
       process.stdout.write(rain.frame(term.cols,term.rows,`${command} working`));
-    } else if (dirty || showingRain) {
+    } else if (dirty || showingRain || returning) {
+      if (showingRain && !offset) returning = new ReturnTransition(performance.now(), view.state === 'attention' ? 350 : 850);
       showingRain = false;
-      process.stdout.write(renderScreen(term, offset));
+      if (returning?.done()) returning = undefined;
+      process.stdout.write(returning ? returning.frame(term, rain) : renderScreen(term, offset));
       visibleCells = captureScreen(term, offset);
       dirty = false;
     }
@@ -42,6 +46,7 @@ export async function runSession(command, args, { demo = false } = {}) {
   const done = new Promise(resolve => { resolveDone = resolve; });
   const finish = (code = 0) => {
     if (closed) return;
+    returning = undefined; showingRain = false;
     if (!demo) { view.reveal(); offset = 0; dirty = true; paint(); }
     const finalText = demo ? '' : screenLines(term).map(line => line.trimEnd()).join('\r\n').trimEnd();
     closed = true;
@@ -62,7 +67,9 @@ export async function runSession(command, args, { demo = false } = {}) {
     for (const event of events) {
       if (event.type === 'text') { input(event.data); continue; }
       if (event.type === 'paste-start') {
-        discardPaste = view.rain || offset > 0;
+        const autoReturn = returning && !view.peek;
+        if (returning) { returning = undefined; dirty = true; paint(); }
+        discardPaste = view.rain || offset > 0 || Boolean(autoReturn);
         if (discardPaste) { view.reveal(); offset = 0; dirty = true; paint(); }
       }
       if (!discardPaste) child?.write(event.data);
@@ -78,6 +85,11 @@ export async function runSession(command, args, { demo = false } = {}) {
   function input(chunk) {
     const data = chunk.toString('utf8');
     if (demo) { if (data.includes('\x03') || data === 'q') finish(); return; }
+    if (returning) {
+      returning = undefined; dirty = true; paint();
+      // First input during an automatic reveal finishes it without answering unseen prompts.
+      if (!view.peek && data !== '\x03' && data !== '\x1d') { view.reveal(); return; }
+    }
     if (data === '\x1d') { offset = 0; view.toggle(); dirty = true; paint(); return; }
     if (data === '\x1b[5;2~' || data === '\x1b[6;2~') {
       view.reveal();
@@ -92,7 +104,7 @@ export async function runSession(command, args, { demo = false } = {}) {
     if (/[\r\n]/.test(data)) view.submitted();
     child.write(data);
   }
-  function resize() { if (closed) return; const s = size(); term.resize(s.cols,s.rows); child?.resize(s.cols,s.rows); dirty = true; paint(); }
+  function resize() { if (closed) return; returning = undefined; const s = size(); term.resize(s.cols,s.rows); child?.resize(s.cols,s.rows); dirty = true; paint(); }
   process.stdin.on('data', receive); process.stdout.on('resize', resize);
   process.on('SIGTERM', terminate); process.on('SIGHUP', hangup); process.on('SIGINT', interrupt);
   const timer = setInterval(paint, 60);

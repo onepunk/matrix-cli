@@ -8,6 +8,7 @@ import xterm from '@xterm/headless';
 import { detectState, ViewState } from '../src/state.js';
 import { renderScreen, screenLines, captureScreen } from '../src/screen.js';
 import { Rain } from '../src/rain.js';
+import { ReturnTransition } from '../src/return.js';
 import { InputParser } from '../src/input.js';
 const write = (term, data) => new Promise(resolve => term.write(data, resolve));
 
@@ -305,4 +306,24 @@ test('closing work after a revealed response stays visible until the next prompt
   view.submitted(); view.update('working',5000); assert.ok(view.rain);
   view.reveal(); view.submitted(); view.update('working',6000); assert.equal(view.rain,false);
   view.toggle(); assert.ok(view.rain);
+});
+
+
+test('return transition resolves current output and restores Unicode, colours and cursor', async () => {
+  const source = new xterm.Terminal({cols:60,rows:20,allowProposedApi:true});
+  const target = new xterm.Terminal({cols:60,rows:20,allowProposedApi:true});
+  const rain = new Rain(()=>.5);
+  for(let i=0;i<60;i++)rain.frame(60,20,'working');
+  await write(source,'\x1b[31mReview complete 界\x1b[0m\r\nAll checks passed.');
+  const transition = new ReturnTransition(0);
+  await write(target,'\x1b[?7l'+transition.frame(source,rain,400));
+  assert.equal(target.buffer.active.baseY,0);
+  assert.ok(screenLines(target)[0].includes('Review complete 界'));
+  await write(source,'\r\nReady for your next prompt.');
+  await write(target,transition.frame(source,rain,850));
+  assert.deepEqual(screenLines(target).map(s=>s.trimEnd()),screenLines(source).map(s=>s.trimEnd()));
+  assert.equal(target.buffer.active.getLine(0).getCell(0).getFgColor(),1);
+  assert.equal(target.buffer.active.cursorY,source.buffer.active.cursorY);
+  assert.ok(transition.done(850));
+  source.dispose();target.dispose();
 });
