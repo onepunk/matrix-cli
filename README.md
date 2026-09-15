@@ -39,7 +39,7 @@ Once revealed, the live view stays visible until you press `Ctrl+]` again.
 
 **Alpha.** Tested locally on macOS; CI targets macOS and Linux. Windows is not validated. Automatic animation detects visible working indicators, so CLI updates can affect detection. Questions and errors take precedence when recognized; press any key to reveal immediately.
 
-Text, colours and Unicode are supported. Mouse reporting, terminal graphics, hyperlinks and some advanced keyboard features are not. History is held in memory for the session. Native dependency builds may require compiler tools.
+Text, colours and Unicode are supported. Mouse reporting, terminal graphics, hyperlinks and some advanced keyboard features are not. History is held in memory for the session; the last screen is printed when the agent exits. Native dependency builds may require compiler tools.
 
 ## Development
 

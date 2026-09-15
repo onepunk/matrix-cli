@@ -8,6 +8,7 @@ import xterm from '@xterm/headless';
 import { detectState, ViewState } from '../src/state.js';
 import { renderScreen, screenLines, captureScreen } from '../src/screen.js';
 import { Rain } from '../src/rain.js';
+import { InputParser } from '../src/input.js';
 const write = (term, data) => new Promise(resolve => term.write(data, resolve));
 
 test('attention takes precedence and unknown screens stay visible', () => {
@@ -83,6 +84,7 @@ process.stdin.on('data', b => {
     assert.ok(!screen().includes(`${agent} working`));
     child.write('n'); assert.equal((await exit).exitCode,7);
     assert.ok(raw.includes('Result: n')); assert.ok(raw.includes('\x1b[?1049l'));
+    assert.ok(raw.slice(raw.lastIndexOf('\x1b[?1049l')).includes('Result: n'));
   } finally { if(!exited) child.kill(); term.dispose(); await rm(dir,{recursive:true,force:true}); }
 });
 
@@ -205,4 +207,85 @@ test('historical background waiting cannot hide completion or cancellation', () 
     assert.equal(detectState([waiting, ending, ...Array(20).fill(''), '❯']), 'idle');
   }
   assert.equal(detectState(['✻ Cooked for 35s', waiting, ...Array(20).fill(''), '❯']), 'working');
+});
+
+
+test('Codex warnings and review text do not override active work', () => {
+  const working = '• Working (7s • esc to interrupt)';
+  assert.equal(detectState(['⚠ MCP startup incomplete (failed: example-server)', working, '› Ask Codex to do anything']), 'working');
+  assert.equal(detectState(['• Inspecting permission checks and failed test handling.', working]), 'working');
+  assert.equal(detectState(['• Reading src/permissions.js', working]), 'working');
+  assert.equal(detectState([working, 'Would you like to run the following command?', '1. Yes, proceed', '2. No, cancel']), 'attention');
+  assert.equal(detectState([working, 'Approval required']), 'attention');
+  assert.equal(detectState(['Error: connection lost']), 'attention');
+});
+
+
+test('Codex quoted interrupt hints cannot restart rain in the final answer', () => {
+  assert.equal(detectState(['  - Working indicators hide errors. Reproduced with Working', '    (esc to interrupt) followed by Error: connection lost: rain remains active.']), 'idle');
+  assert.equal(detectState(['• Working (12s • esc to interrupt)', 'Error: connection lost']), 'attention');
+  assert.equal(detectState(['• Working (12s • esc to interrupt)']), 'working');
+});
+
+
+test('paste boundaries survive every chunk split without treating pasted controls as keys', () => {
+  const text = '\x1b[200~hello\r\x1d界\x1b[201~';
+  for (let i=1;i<text.length;i++) {
+    const parser = new InputParser();
+    const events = [...parser.push(text.slice(0,i)),...parser.push(text.slice(i))];
+    assert.equal(events[0].type,'paste-start');
+    assert.equal(events.at(-1).type,'paste-end');
+    assert.equal(events.slice(1,-1).map(e=>e.data).join(''),'hello\r\x1d界');
+    assert.ok(events.slice(1,-1).every(e=>e.type==='paste-data'));
+    assert.equal(parser.pending,'');
+  }
+});
+
+test('PTY consumes a fragmented reveal paste and preserves a subsequent live paste', {timeout:10000}, async () => {
+  const dir = await mkdtemp(join(tmpdir(),'matrix-paste-'));
+  const log=join(dir,'input.log');
+  await writeFile(join(dir,'codex'), `#!${process.execPath}
+const fs=require('fs');process.stdin.setRawMode(true);process.stdin.resume();
+process.stdout.write('Working (esc to interrupt)');
+process.stdin.on('data',b=>fs.appendFileSync(${JSON.stringify(log)},b));
+`,{mode:0o755});
+  const term = new xterm.Terminal({cols:80,rows:24,allowProposedApi:true});
+  const child = pty.spawn(process.execPath,[resolve('src/cli.js'),'codex'],{cols:80,rows:24,cwd:process.cwd(),env:{...process.env,PATH:`${dir}:${process.env.PATH}`}});
+  child.onData(d=>term.write(d));
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  try {
+    for(let i=0;i<100 && !screenLines(term).join('\n').includes('codex working');i++)await sleep(20);
+    assert.ok(screenLines(term).join('\n').includes('codex working'));
+    for(const chunk of ['\x1b[20','0~hidden\r','paste','\x1b[20','1~']) {child.write(chunk);await sleep(60);}
+    const {readFile}=await import('node:fs/promises');
+    await assert.rejects(readFile(log),{code:'ENOENT'});
+    assert.ok(screenLines(term).join('\n').includes('Working (esc to interrupt)'));
+    for(const chunk of ['\x1b[200~','hello 界\r','\x1b[201~']) {child.write(chunk);await sleep(30);}
+    assert.equal(await readFile(log,'utf8'),'\x1b[200~hello 界\r\x1b[201~');
+    const bytes = Buffer.from('界');
+    for (const byte of bytes) {child.write(Buffer.from([byte]));await sleep(30);}
+    assert.equal(await readFile(log,'utf8'),'\x1b[200~hello 界\r\x1b[201~界');
+  } finally {child.kill();term.dispose();await rm(dir,{recursive:true,force:true});}
+});
+
+
+test('Codex startup and background-terminal statuses remain active', () => {
+  for (const status of [
+    '• Starting MCP servers (2/4): example-tools, example-apps (0s • esc to interrupt)',
+    '◦ Working (17s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close',
+  ]) assert.equal(detectState([status,'› Ask Codex to do anything']), 'working');
+});
+
+
+test('approval dialogs above the footer reveal over background work', () => {
+  assert.equal(detectState(['* Waiting for 1 background agent to finish', 'Do you want to continue?', ...Array(25).fill(''), '❯']), 'attention');
+  assert.equal(detectState(['• Source contains "press enter" in its regex.', '• Working (1s • esc to interrupt)']), 'working');
+});
+
+test('fragmented cursor and history keys remain complete sequences', () => {
+  const parser = new InputParser();
+  assert.deepEqual(parser.push('\x1b[5'),[]);
+  assert.deepEqual(parser.push(';2~'),[{type:'text',data:'\x1b[5;2~'}]);
+  assert.deepEqual(parser.push('\x1b['),[]);
+  assert.deepEqual(parser.push('A'),[{type:'text',data:'\x1b[A'}]);
 });

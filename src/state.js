@@ -5,9 +5,14 @@ export function detectState(lines) {
   const footer = visible.slice(-10).join('\n');
   // Claude displays this mode badge even while working. It is not a request.
   // Remove only the known badge phrase, so actual questions on the same line win.
-  const prompts = footer.replace(/\bbypass permissions on\b/gi, '');
-  if (/(?:allow|approve|permission|confirm|do you want|would you like|sign in|log in|error:|failed|press enter|enter to (?:confirm|select))/i.test(prompts)) return 'attention';
-  if (/(?:esc(?:ape)? to (?:interrupt|cancel|stop)|ctrl\+c to interrupt)/i.test(footer)) return 'working';
+  const prompts = visible.join('\n').replace(/\bbypass permissions on\b/gi, '');
+  // Match actual interaction prompts, not words in logs or source under review.
+  const question = /^[ \t]*(?:[│┃›❯>][ \t]*)?(?:do you want\b|would you like\b|allow\b[^\n]*\?|approve\b[^\n]*\?|(?:permission|approval) (?:required|needed|requested)\b)/im;
+  if (question.test(prompts) || /(?:^[ \t]*(?:[│┃›❯>][ \t]*)?(?:press enter|enter to (?:confirm|select))\b|(?:^|[·•])[ \t]*confirm (?:action|command|changes)\?)/im.test(prompts)) return 'attention';
+  if (/^[ \t]*(?:[⚠×!][ \t]*)?(?:error:|failed\b|sign in\b|log in\b)/im.test(footer)) return 'attention';
+  if (/^[ \t]*(?:[•●◦✳✶✻✽✢✱*·][ \t]+)?[\p{L}][\p{L}\p{N} ….:/_-]*\([^\n()]*\b(?:esc(?:ape)? to (?:interrupt|cancel|stop)|ctrl\+c to interrupt)\)[ \t]*$/imu.test(footer)) return 'working';
+  // Codex adds MCP startup details and a background-terminal suffix to this line.
+  if (/^[ \t]*[•◦●][ \t]+[^\n]*\(\d+[^\n)]*\besc to interrupt\)(?:[ \t]*·[^\n]*)?[ \t]*$/m.test(footer)) return 'working';
   // Claude's current spinner uses rotating verbs and elapsed time/token counts.
   // Match the status shape rather than a list of verbs; completed summaries lack ellipses.
   if (/^\s*[^\p{L}\p{N}\n]*[\p{L}][\p{L}\p{M} -]*(?:…|\.{3})\s*\([^\n)]*?\b\d+(?:\.\d+)?[hms](?=[\s·•)])[^\n)]*\)\s*$/mu.test(footer)) return 'working';
