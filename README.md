@@ -25,6 +25,18 @@ matrix --demo
 
 Arguments pass through to the selected CLI, for example `matrix claude --continue` or `matrix codex resume --last`. Uses your existing agent configuration and account; no wrapper account or telemetry. Agent usage charges still apply.
 
+## Effects
+
+Disable either effect independently, or combine both flags:
+
+```sh
+matrix claude --no-rain
+matrix codex --no-text-flicker
+matrix claude --no-rain --no-text-flicker
+```
+
+These wrapper flags work before or after the agent name and are not forwarded to the agent. Other arguments pass through unchanged; arguments after `--` are always passed through literally. With `--no-rain`, Ctrl+] does not enable rain. With `--no-text-flicker`, text appears immediately, including when returning from rain.
+
 ## Controls
 
 | Key | Action |

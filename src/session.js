@@ -5,9 +5,10 @@ import { InputParser } from './input.js';
 import xterm from '@xterm/headless';
 import { detectState, ViewState } from './state.js';
 import { Rain } from './rain.js';
-import { screenLines, captureScreen } from './screen.js';
+import { renderScreen, screenLines, captureScreen } from './screen.js';
 
-export async function runSession(command, args, { demo = false } = {}) {
+export async function runSession(command, args, { demo = false, rain: rainEnabled = true, textFlicker = true } = {}) {
+  if (demo && !rainEnabled) throw new Error('--demo requires rain; remove --no-rain.');
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('An interactive terminal is required.');
   const size = () => ({ cols: Math.max(2, process.stdout.columns || 80), rows: Math.max(3, process.stdout.rows || 24) });
   const term = new xterm.Terminal({ ...size(), allowProposedApi: true, scrollback: 5000 });
@@ -30,17 +31,17 @@ export async function runSession(command, args, { demo = false } = {}) {
     if (closed || process.stdout.writableLength > 65536) return;
     view.tick();
     if (demo) { if (dirty) process.stdout.write(rain.frame(term.cols,term.rows,'MATRIX DEMO — Ctrl+C exits')); return; }
-    if (view.rain && !offset) {
+    if (rainEnabled && view.rain && !offset) {
       returning = undefined;
       if (!showingRain) rain.enter(visibleCells);
       showingRain = true;
       process.stdout.write(rain.frame(term.cols,term.rows,`${command} working`));
     } else if (dirty || showingRain || returning || flicker.active) {
       if (view.state === 'attention') { returning = undefined; flicker.settle(); }
-      if (showingRain && !offset && view.state !== 'attention') returning = new ReturnTransition(performance.now(),500,flicker);
+      if (textFlicker && showingRain && !offset && view.state !== 'attention') returning = new ReturnTransition(performance.now(),500,flicker);
       showingRain = false;
       if (returning?.done()) returning = undefined;
-      process.stdout.write(returning ? returning.frame(term, rain) : flicker.frame(term, offset, performance.now(), view.state !== 'attention'));
+      process.stdout.write(!textFlicker ? renderScreen(term, offset) : returning ? returning.frame(term, rain) : flicker.frame(term, offset, performance.now(), view.state !== 'attention'));
       visibleCells = captureScreen(term, offset);
       dirty = false;
     }
@@ -72,7 +73,7 @@ export async function runSession(command, args, { demo = false } = {}) {
       if (event.type === 'paste-start') {
         const autoReturn = returning && !view.peek;
         if (returning || flicker.active) { flicker.settle(); returning = undefined; dirty = true; paint(); }
-        discardPaste = view.rain || offset > 0 || Boolean(autoReturn);
+        discardPaste = (rainEnabled && view.rain) || offset > 0 || Boolean(autoReturn);
         if (discardPaste) { view.reveal(); offset = 0; dirty = true; paint(); }
       }
       if (!discardPaste) child?.write(event.data);
@@ -94,13 +95,13 @@ export async function runSession(command, args, { demo = false } = {}) {
       // First input during an automatic reveal finishes it without answering unseen prompts.
       if (autoReturn && data !== '\x03' && data !== '\x1d') { view.reveal(); return; }
     }
-    if (data === '\x1d') { offset = 0; view.toggle(); dirty = true; paint(); return; }
+    if (data === '\x1d') { if (!rainEnabled) return; offset = 0; view.toggle(); dirty = true; paint(); return; }
     if (data === '\x1b[5;2~' || data === '\x1b[6;2~') {
       view.reveal();
       offset = Math.max(0, Math.min(term.buffer.active.baseY, offset + (data === '\x1b[5;2~' ? 1 : -1) * Math.max(1, term.rows - 2)));
       dirty = true; paint(); return;
     }
-    if (view.rain || offset) {
+    if ((rainEnabled && view.rain) || offset) {
       view.reveal(); offset = 0; dirty = true; paint();
       // Reveal first. Never let a blind keystroke approve a hidden dialog.
       if (data !== '\x03') return;
