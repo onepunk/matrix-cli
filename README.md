@@ -35,12 +35,6 @@ Arguments pass through to the selected CLI, for example `matrix claude --continu
 
 Manual reveal stays visible until you press `Ctrl+]` again. After a response appears automatically, closing activity cannot restart the rain; submitting your next prompt re-enables automatic rain.
 
-## Status
-
-**Alpha.** Tested locally on macOS; CI targets macOS and Linux. Windows is not validated. Automatic animation detects visible working indicators, so CLI updates can affect detection. Questions and errors take precedence when recognized; press any key to reveal immediately.
-
-Text, colours and Unicode are supported. Mouse reporting, terminal graphics, hyperlinks and some advanced keyboard features are not. History is held in memory for the session; the last screen is printed when the agent exits. Native dependency builds may require compiler tools.
-
 ## Development
 
 ```sh
