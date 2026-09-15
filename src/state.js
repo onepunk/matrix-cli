@@ -8,6 +8,9 @@ export function detectState(lines) {
   const prompts = footer.replace(/\bbypass permissions on\b/gi, '');
   if (/(?:allow|approve|permission|confirm|do you want|would you like|sign in|log in|error:|failed|press enter|enter to (?:confirm|select))/i.test(prompts)) return 'attention';
   if (/(?:esc(?:ape)? to (?:interrupt|cancel|stop)|ctrl\+c to interrupt)/i.test(footer)) return 'working';
+  // Claude's current spinner uses rotating verbs and elapsed time/token counts.
+  // Match the status shape rather than a list of verbs; completed summaries lack ellipses.
+  if (/^\s*[^\p{L}\p{N}\n]*[\p{L}][\p{L}\p{M} -]*(?:…|\.{3})\s*\(\s*\d+(?:\.\d+)?[hms](?=[\s·•)])[^\n)]*\)\s*$/mu.test(footer)) return 'working';
   return 'idle';
 }
 

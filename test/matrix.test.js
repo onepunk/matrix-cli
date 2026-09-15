@@ -45,13 +45,14 @@ test('rain renders inside resized terminal', async () => {
 for (const agent of ['codex','claude']) test(`${agent}: PTY animation, reveal, approval, resize and exit code`, {timeout:15000}, async () => {
   const dir = await mkdtemp(join(tmpdir(),'matrix-test-'));
   const executable = join(dir,agent);
+  const working = agent === 'claude' ? '· Smooshing… (18s · ↓ 360 tokens)' : 'Working (esc to interrupt)';
   await writeFile(executable, `#!${process.execPath}\nprocess.stdin.setRawMode(true); process.stdin.resume();
 function screen(s) { process.stdout.write('\\x1b[2J\\x1b[H'+s); }
 screen('Ready>');
 let stage=0;
 process.stdin.on('data', b => {
- if(b.toString() === 'refresh') { screen('Between tools'); setTimeout(()=>screen('Editing secret-file.js\\r\\nWorking (esc to interrupt)'),100); return; }
- if(stage===0) {stage++; screen('Editing secret-file.js\\r\\nWorking (esc to interrupt)');}
+ if(b.toString() === 'refresh') { screen('Between tools'); setTimeout(()=>screen('Editing secret-file.js\\r\\n${working}'),100); return; }
+ if(stage===0) {stage++; screen('Editing secret-file.js\\r\\n${working}');}
  else if(stage===1) {stage++; screen('Do you want to approve? [y/n]');}
  else {screen('Result: '+b.toString());setTimeout(()=>process.exit(7),200);}
 });\n`, {mode:0o755});
@@ -71,7 +72,7 @@ process.stdin.on('data', b => {
     assert.ok(!screen().includes('approve?'));
     child.write('refresh');
     await until(()=>screen().includes('Between tools'));
-    await until(()=>screen().includes('Working (esc to interrupt)'));
+    await until(()=>screen().includes(working));
     await new Promise(r=>setTimeout(r,200));
     assert.ok(!screen().includes(`${agent} working`));
     child.write('\x1d');
@@ -121,4 +122,20 @@ test('Claude bypass-permissions mode badge does not suppress rain or toggling', 
   view.update(detectState(['Thinking… (esc to interrupt)', badge]));
   assert.equal(view.rain,false);
   view.toggle(); assert.ok(view.rain);
+});
+
+
+test('Claude elapsed-time spinner activates rain without an interrupt hint', () => {
+  const footer = [
+    '· Smooshing… (18s · ↓ 360 tokens)', '', '────────────────', '❯',
+    '────────────────', 'Sonnet · 5% context',
+    '⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents',
+  ];
+  assert.equal(detectState(footer), 'working');
+  for (const spinner of ['✻ Thinking… (2s)', '* Pondering... (1m 12s · ↑ 1.2k tokens)', '· Working… (0.5s)']) {
+    assert.equal(detectState([spinner, ...footer.slice(1)]), 'working');
+  }
+  assert.equal(detectState(['✻ Cooked for 18s', ...footer.slice(1)]), 'idle');
+  assert.equal(detectState([...footer, 'Do you want to allow this command?']), 'attention');
+  assert.equal(detectState(['The documentation mentions Smooshing… (18s · ↓ 360 tokens).']), 'idle');
 });
