@@ -158,7 +158,7 @@ test('partial redraws do not stop rain; settled idle and prompts reveal', () => 
   view.update('idle',100); view.tick(300); assert.ok(view.rain);
   view.update('working',400); view.tick(900); assert.ok(view.rain);
   view.update('idle',1000); view.tick(1600); assert.equal(view.rain,false);
-  view.update('working',1700); assert.ok(view.rain);
+  view.submitted(); view.update('working',1700); assert.ok(view.rain);
   view.update('attention',1701); assert.equal(view.rain,false);
 });
 
@@ -180,6 +180,8 @@ process.stdin.on('data',()=>{
  setTimeout(()=>screen('✳ Thinking… (running PostToolUse hooks… 0/2 · 2s)'),100);
  setTimeout(()=>screen('* Waiting for 1 background agent to finish'),200);
  setTimeout(()=>screen('Review complete.\\r\\n❯'),500);
+ setTimeout(()=>screen('✳ Thinking… (running Stop hooks… 0/2 · 3s)'),1400);
+ setTimeout(()=>screen('Review complete.\\r\\n❯'),1900);
 });
 `,{mode:0o755});
   const term = new xterm.Terminal({cols:80,rows:24,allowProposedApi:true});
@@ -197,6 +199,8 @@ process.stdin.on('data',()=>{
     while(Date.now()-start<450){assert.ok(screen().includes('claude working'));await new Promise(r=>setTimeout(r,20));}
     await until(()=>screen().includes('Review complete.'));
     assert.ok(!screen().includes('claude working'));
+    const afterReply=Date.now();
+    while(Date.now()-afterReply<1200){assert.ok(!screen().includes('claude working'));await new Promise(r=>setTimeout(r,20));}
   } finally {child.kill();term.dispose();await rm(dir,{recursive:true,force:true});}
 });
 
@@ -288,4 +292,17 @@ test('fragmented cursor and history keys remain complete sequences', () => {
   assert.deepEqual(parser.push(';2~'),[{type:'text',data:'\x1b[5;2~'}]);
   assert.deepEqual(parser.push('\x1b['),[]);
   assert.deepEqual(parser.push('A'),[{type:'text',data:'\x1b[A'}]);
+});
+
+
+test('closing work after a revealed response stays visible until the next prompt', () => {
+  const view = new ViewState();
+  view.update('working',0); assert.ok(view.rain);
+  view.update('idle',1000); view.tick(1600); assert.equal(view.rain,false);
+  view.update('working',2000); assert.equal(view.rain,false);
+  view.tick(3500); assert.equal(view.rain,false);
+  view.update('idle',4000); view.tick(4600); assert.equal(view.rain,false);
+  view.submitted(); view.update('working',5000); assert.ok(view.rain);
+  view.reveal(); view.submitted(); view.update('working',6000); assert.equal(view.rain,false);
+  view.toggle(); assert.ok(view.rain);
 });

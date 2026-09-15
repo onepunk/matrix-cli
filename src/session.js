@@ -89,6 +89,7 @@ export async function runSession(command, args, { demo = false } = {}) {
       // Reveal first. Never let a blind keystroke approve a hidden dialog.
       if (data !== '\x03') return;
     }
+    if (/[\r\n]/.test(data)) view.submitted();
     child.write(data);
   }
   function resize() { if (closed) return; const s = size(); term.resize(s.cols,s.rows); child?.resize(s.cols,s.rows); dirty = true; paint(); }

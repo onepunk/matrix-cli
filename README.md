@@ -33,7 +33,7 @@ Arguments pass through to the selected CLI, for example `matrix claude --continu
 | `Shift+PageUp` / `Shift+PageDown` | Browse retained terminal history |
 | `q` in demo | Exit |
 
-Once revealed, the live view stays visible until you press `Ctrl+]` again.
+Manual reveal stays visible until you press `Ctrl+]` again. After a response appears automatically, closing activity cannot restart the rain; submitting your next prompt re-enables automatic rain.
 
 ## Status
 

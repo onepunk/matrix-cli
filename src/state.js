@@ -27,7 +27,7 @@ export function detectState(lines) {
 }
 
 export class ViewState {
-  constructor() { this.manual = false; this.peek = false; this.state = 'idle'; }
+  constructor() { this.manual = false; this.peek = false; this.state = 'idle'; this.autoPaused = false; }
   update(state, now = performance.now()) {
     if (state === 'idle' && this.state === 'working') {
       this.idleSince ??= now;
@@ -43,11 +43,16 @@ export class ViewState {
     // A missing spinner can be a partial redraw. Confirm idle after a short grace period.
     if (this.idleSince !== undefined && now - this.idleSince >= 600) {
       this.state = 'idle';
+      this.autoPaused = true;
       this.manual = false;
       this.idleSince = undefined;
     }
   }
-  get rain() { return this.state !== 'attention' && (this.manual || (this.state === 'working' && !this.peek)); }
+  submitted() {
+    // A new prompt may start automatic rain again. Manual reveal stays sticky.
+    this.autoPaused = false;
+  }
+  get rain() { return this.state !== 'attention' && (this.manual || (this.state === 'working' && !this.peek && !this.autoPaused)); }
   toggle() {
     if (this.rain) { this.manual = false; this.peek = true; }
     else { this.manual = true; this.peek = false; }
