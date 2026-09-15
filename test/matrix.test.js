@@ -139,3 +139,61 @@ test('Claude elapsed-time spinner activates rain without an interrupt hint', () 
   assert.equal(detectState([...footer, 'Do you want to allow this command?']), 'attention');
   assert.equal(detectState(['The documentation mentions Smooshing… (18s · ↓ 360 tokens).']), 'idle');
 });
+
+
+test('Claude tool-hook phases remain working', () => {
+  for (const phase of ['PreToolUse', 'PostToolUse']) {
+    assert.equal(detectState([
+      `✳ Honking… (running ${phase} hooks… 0/2 · 6s · ↓ 225 tokens · thought for 4s)`,
+      '❯', '⏵⏵ bypass permissions on (shift+tab to cycle)',
+    ]), 'working');
+  }
+});
+
+test('partial redraws do not stop rain; settled idle and prompts reveal', () => {
+  const view = new ViewState();
+  view.update('working',0);
+  view.update('idle',100); view.tick(300); assert.ok(view.rain);
+  view.update('working',400); view.tick(900); assert.ok(view.rain);
+  view.update('idle',1000); view.tick(1600); assert.equal(view.rain,false);
+  view.update('working',1700); assert.ok(view.rain);
+  view.update('attention',1701); assert.equal(view.rain,false);
+});
+
+
+test('Claude initial spinner and background review remain active', () => {
+  assert.equal(detectState(['✳ Cascading…', '❯', 'Sonnet']), 'working');
+  assert.equal(detectState(['* Waiting for 1 background agent to finish', ...Array(30).fill(''), '❯', 'Sonnet']), 'working');
+  assert.equal(detectState(['* Waiting for 2 background agents to finish', ...Array(30).fill(''), 'Do you want to continue?']), 'attention');
+});
+
+test('PTY keeps rain through redraw gaps and background work, then reveals completion', {timeout:10000}, async () => {
+  const dir = await mkdtemp(join(tmpdir(),'matrix-lifecycle-'));
+  await writeFile(join(dir,'claude'), `#!${process.execPath}
+process.stdin.setRawMode(true); process.stdin.resume();
+function screen(s){process.stdout.write('\\x1b[2J\\x1b[H'+s);}
+screen('✳ Thinking… (1s)');
+process.stdin.on('data',()=>{
+ screen('Partial redraw');
+ setTimeout(()=>screen('✳ Thinking… (running PostToolUse hooks… 0/2 · 2s)'),100);
+ setTimeout(()=>screen('* Waiting for 1 background agent to finish'),200);
+ setTimeout(()=>screen('Review complete.\\r\\n❯'),500);
+});
+`,{mode:0o755});
+  const term = new xterm.Terminal({cols:80,rows:24,allowProposedApi:true});
+  const child = pty.spawn(process.execPath,[resolve('src/cli.js'),'claude'],{cols:80,rows:24,cwd:process.cwd(),env:{...process.env,PATH:`${dir}:${process.env.PATH}`}});
+  child.onData(d=>term.write(d));
+  const screen=()=>screenLines(term).join('\n');
+  const until=async check=>{const start=Date.now();while(!check()){if(Date.now()-start>4000)throw new Error('Lifecycle timeout');await new Promise(r=>setTimeout(r,20));}};
+  try {
+    await until(()=>screen().includes('claude working'));
+    // Reveal, start the deterministic phase sequence, then explicitly return to rain.
+    child.write('\x1d'); await until(()=>screen().includes('Thinking'));
+    child.write('go'); child.write('\x1d');
+    await until(()=>screen().includes('claude working'));
+    const start=Date.now();
+    while(Date.now()-start<450){assert.ok(screen().includes('claude working'));await new Promise(r=>setTimeout(r,20));}
+    await until(()=>screen().includes('Review complete.'));
+    assert.ok(!screen().includes('claude working'));
+  } finally {child.kill();term.dispose();await rm(dir,{recursive:true,force:true});}
+});

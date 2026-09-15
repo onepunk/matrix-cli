@@ -10,16 +10,33 @@ export function detectState(lines) {
   if (/(?:esc(?:ape)? to (?:interrupt|cancel|stop)|ctrl\+c to interrupt)/i.test(footer)) return 'working';
   // Claude's current spinner uses rotating verbs and elapsed time/token counts.
   // Match the status shape rather than a list of verbs; completed summaries lack ellipses.
-  if (/^\s*[^\p{L}\p{N}\n]*[\p{L}][\p{L}\p{M} -]*(?:…|\.{3})\s*\(\s*\d+(?:\.\d+)?[hms](?=[\s·•)])[^\n)]*\)\s*$/mu.test(footer)) return 'working';
+  if (/^\s*[^\p{L}\p{N}\n]*[\p{L}][\p{L}\p{M} -]*(?:…|\.{3})\s*\([^\n)]*?\b\d+(?:\.\d+)?[hms](?=[\s·•)])[^\n)]*\)\s*$/mu.test(footer)) return 'working';
+  if (/^[ \t]*[✳✶✻✽✢✱*·][ \t]+[\p{L}][\p{L}\p{M} -]*(?:…|\.{3})[ \t]*$/mu.test(footer)) return 'working';
+  // Background reviews move their waiting indicator above the large empty prompt area.
+  if (visible.some(line => /^[ \t]*[✳✶✻✽✢✱*·][ \t]+Waiting for \d+ background agents? to finish[ \t]*$/u.test(line))) return 'working';
   return 'idle';
 }
 
 export class ViewState {
   constructor() { this.manual = false; this.peek = false; this.state = 'idle'; }
-  update(state) {
+  update(state, now = performance.now()) {
+    if (state === 'idle' && this.state === 'working') {
+      this.idleSince ??= now;
+      this.tick(now);
+      return;
+    }
+    this.idleSince = undefined;
     if (state !== 'working') this.manual = false;
     // User reveal is sticky across redraws, tool changes and subsequent turns.
     this.state = state;
+  }
+  tick(now = performance.now()) {
+    // A missing spinner can be a partial redraw. Confirm idle after a short grace period.
+    if (this.idleSince !== undefined && now - this.idleSince >= 600) {
+      this.state = 'idle';
+      this.manual = false;
+      this.idleSince = undefined;
+    }
   }
   get rain() { return this.state !== 'attention' && (this.manual || (this.state === 'working' && !this.peek)); }
   toggle() {

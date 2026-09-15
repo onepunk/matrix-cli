@@ -21,6 +21,7 @@ export async function runSession(command, args, { demo = false } = {}) {
   const reply = term.onData(data => child?.write(data));
   const paint = () => {
     if (closed || process.stdout.writableLength > 65536) return;
+    view.tick();
     if (demo) { if (dirty) process.stdout.write(rain.frame(term.cols,term.rows,'MATRIX DEMO — Ctrl+C exits')); return; }
     if (view.rain && !offset) {
       if (!showingRain) rain.enter(visibleCells);
