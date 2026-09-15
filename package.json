@@ -1,0 +1,38 @@
+{
+  "name": "agent-matrix-cli",
+  "version": "0.1.0",
+  "description": "Matrix rain while Codex and Claude Code work",
+  "type": "module",
+  "bin": {
+    "matrix": "src/cli.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "scripts",
+    "CONTRIBUTING.md",
+    "NOTICE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/cli.js && node --check src/session.js",
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/onepunk/matrix-cli.git"
+  },
+  "homepage": "https://github.com/onepunk/matrix-cli#readme",
+  "bugs": {
+    "url": "https://github.com/onepunk/matrix-cli/issues"
+  }
+}
